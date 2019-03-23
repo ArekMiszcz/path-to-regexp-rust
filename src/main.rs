@@ -51,7 +51,7 @@ fn escape_string (string: String) -> String {
  */
 fn escape_group (group: String) -> String {
     let re = Regex::new(r"([=!:$/()])").unwrap();
-    re.replace_all(group.as_str(), r"\\$1").into_owned()
+    re.replace_all(group.as_str(), r"\$1").into_owned()
 }
 
 /**
@@ -81,6 +81,14 @@ fn parse (text: &str, options: Options) -> (Vec<String>, Vec<Token>) {
     let mut path_escaped = false;
     let mut paths: Vec<String> = vec![];
     let mut tokens: Vec<Token> = vec![];
+
+    fn unwrap_match_to_str (m: Option<regex::Match>) -> &str {
+        if m != None {
+            m.unwrap().as_str()
+        } else {
+            ""
+        }
+    }
 
     debug!("{}", text);
     debug!("{}", path_regexp.is_match(text));
@@ -112,22 +120,10 @@ fn parse (text: &str, options: Options) -> (Vec<String>, Vec<Token>) {
         debug!("path {:#?}", path);
 
         let mut prev: String = String::new();
-        let name = if res.get(2) != None {
-            res.get(2).unwrap().as_str()
-        } else {
-            ""
-        };
-        let capture = if res.get(3) != None {
-            res.get(3).unwrap().as_str()
-        } else {
-            ""
-        };
+        let name = unwrap_match_to_str(res.get(2));
+        let capture = unwrap_match_to_str(res.get(3));
         let group = res.get(4);
-        let modifier = if res.get(5) != None {
-            res.get(5).unwrap().as_str()
-        } else {
-            ""
-        };
+        let modifier = unwrap_match_to_str(res.get(5));
 
         if !path_escaped && path.len() > 0 {
             let k = path.len();
