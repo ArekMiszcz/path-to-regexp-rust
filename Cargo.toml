@@ -2,7 +2,7 @@
 name = "path_to_regexp"
 version = "0.1.0"
 authors = ["Arkadiusz Miszczyszyn <arkadiusz.miszczyszyn@gmail.com>"]
-edition = "2019"
+edition = "2018"
 include = [
     "**/*.rs",
     "Cargo.toml",
