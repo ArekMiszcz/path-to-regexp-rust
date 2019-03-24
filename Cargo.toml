@@ -1,8 +1,12 @@
 [package]
-name = "path-to-regexp"
+name = "path_to_regexp"
 version = "0.1.0"
 authors = ["Arkadiusz Miszczyszyn <arkadiusz.miszczyszyn@gmail.com>"]
-edition = "2018"
+edition = "2019"
+include = [
+    "**/*.rs",
+    "Cargo.toml",
+]
 
 [dependencies]
 regex = "1.1.2"
