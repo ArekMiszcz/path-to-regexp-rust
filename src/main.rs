@@ -11,13 +11,23 @@ const DEFAULT_DELIMITER: char = '/';
 
 struct Options {
     delimiter: char,
-    whitelist: Vec<String>
+    whitelist: Vec<String>,
+    strict: bool,
+    sensitive: bool,
+    end: bool,
+    start: bool,
+    endsWith: Vec<String>
 }
 impl Default for Options {
     fn default () -> Options {
         Options {
             delimiter: DEFAULT_DELIMITER,
-            whitelist: Vec::new()
+            whitelist: Vec::new(),
+            strict: false,
+            sensitive: false,
+            end: false,
+            start: false,
+            endsWith: Vec::new()
         }
     }
 }
@@ -190,8 +200,6 @@ fn parse (text: &str, options: Options) -> (Vec<String>, Vec<Token>) {
                 _pattern
             }
         });
-
-        debug!("tokens {:#?}", tokens);
     }
 
     // Push any remaining characters.
@@ -203,12 +211,113 @@ fn parse (text: &str, options: Options) -> (Vec<String>, Vec<Token>) {
     (paths, tokens)
 }
 
+/**
+ * Pull out keys from a regexp.
+ *
+ * @param  {!RegExp} path
+ * @param  {Array=}  keys
+ * @return {!RegExp}
+ */
+fn regexpToRegexp (path: Regex, mut keys: Vec<Token>) -> Regex {
+  if keys.len() <= 0 {
+        return path;
+  }
+
+  // Use a negative lookahead to match only capturing groups.
+  let groups = path.captures_iter(r"\((?!\?)");
+  let count = groups.count();
+
+  if count > 0 {
+    for i in 0..count {
+      keys.push(Token {
+        name: i.to_string(),
+        prefix: String::new(),
+        delimiter: ' ',
+        optional: false,
+        repeat: false,
+        pattern: String::new()
+      });
+    }
+  }
+
+  path
+}
+
+/**
+ * Expose a function for taking tokens and returning a RegExp.
+ *
+ * @param  {!Array}  tokens
+ * @param  {Array=}  keys
+ * @param  {Object=} options
+ * @return {!RegExp}
+ */
+// let endsWith = [].concat(options.endsWith || []).map(escape_string).concat('$').join('|');
+fn tokensToRegExp (tokens: Vec<Token>, keys: Vec<Token>, options: Options) {
+    // println!("paths {:#?}", paths);
+    println!("tokens {:#?}", tokens);
+
+    let strict = options.strict;
+    let start = options.start;
+    let end = options.end;
+    let delimiter = options.delimiter;
+    let ends_with = if options.endsWith.len() > 0 {
+        let mut _ends_with_vec = options.endsWith;
+        let mut _ends_with: Vec<String> = _ends_with_vec.into_iter().map(|s| {
+            escape_string(s)
+        }).collect();
+        _ends_with.push(String::from("$"));
+        _ends_with.join("|")
+    } else {
+        String::from("$")
+    };
+    let mut route = if start == true {
+        String::from("^")
+    } else {
+        String::from("")
+    };
+
+    debug!("strict: {:#?}", strict);
+    debug!("start: {:#?}", start);
+    debug!("end: {:#?}", end);
+    debug!("delimiter: {:#?}", delimiter);
+    debug!("ends_with: {:#?}", ends_with);
+    debug!("route: {:#?}", route);
+
+    // Iterate over the tokens and create our regexp string.
+    for i in 0..tokens.len() {
+        let token = &tokens[i];
+        let prefix = String::from(token.prefix.as_str());
+        let capture = if token.repeat == true {
+            format!("(?:{})(?:{}(?:{}))*", token.pattern.as_str(), escape_string(token.delimiter.to_string()).as_str(), token.pattern.as_str())
+        } else {
+            format!("{}", token.pattern.as_str())
+        };
+        
+        debug!("capture: {:#?}", capture);
+
+        if keys.len() > 0 {
+            // keys.push(token);
+        }
+
+        if token.optional {
+            if token.prefix != "" {
+                route = format!("({})", capture.as_str());
+            } else {
+                route = format!("(?:{}({}))?", escape_string(prefix).as_str(), capture.as_str());
+            }
+        } else {
+            route = format!("{}({})", escape_string(prefix).as_str(), capture.as_str());
+        }
+
+        debug!("route: {:#?}", route);
+    }
+}
+
 fn main() {
     pretty_env_logger::init();
 
     let _s: &str = "/route/:foo/(.*)";
     let (paths, tokens) = parse(_s, Options::default());
 
-    println!("paths {:#?}", paths);
-    println!("tokens {:#?}", tokens);
+    tokensToRegExp(tokens, vec![], Options::default());
 }
