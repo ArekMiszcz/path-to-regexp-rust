@@ -1,12 +1,15 @@
 [package]
 name = "path_to_regexp"
 version = "0.1.0"
+homepage = "https://github.com/ArekMiszcz/path-to-regexp-rust/tree/v0.1.0"
 authors = ["Arkadiusz Miszczyszyn <arkadiusz.miszczyszyn@gmail.com>"]
 edition = "2018"
 include = [
     "**/*.rs",
     "Cargo.toml",
 ]
+description = "Turn a path string such as `/user/:name` into a regular expression"
+license = "MIT"
 
 [dependencies]
 regex = "1.1.2"
