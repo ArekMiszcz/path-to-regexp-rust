@@ -1,7 +1,7 @@
 [package]
 name = "path_to_regexp"
-version = "0.1.0"
-homepage = "https://github.com/ArekMiszcz/path-to-regexp-rust/tree/v0.1.0"
+version = "0.1.1"
+homepage = "https://github.com/ArekMiszcz/path-to-regexp-rust/tree/v0.1.1"
 authors = ["Arkadiusz Miszczyszyn <arkadiusz.miszczyszyn@gmail.com>"]
 edition = "2018"
 include = [
@@ -12,6 +12,7 @@ description = "Turn a path string such as `/user/:name` into a regular expressio
 license = "MIT"
 
 [dependencies]
-regex = "1.1.2"
+regex = "1.1"
+fancy-regex = "0.1"
 log = "0.4"
 pretty_env_logger = "0.3.0"
