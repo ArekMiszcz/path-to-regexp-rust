@@ -40,3 +40,5 @@ fn main() {
 
 This package is heavily inspired by its JavaScript
 [path-to-regexp][path-to-regexp-js].
+
+[path-to-regexp-js]: https://github.com/pillarjs/path-to-regexp
