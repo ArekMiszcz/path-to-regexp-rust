@@ -3,7 +3,7 @@ Turn a path string such as `/user/:name` into a regular expression
 
 ---
 
-**Usage example:**
+## Usage example
 ```rs
 extern crate path_to_regexp;
 
@@ -37,3 +37,8 @@ fn main() {
     */
 }
 ```
+
+## Credit
+
+This package is heavily inspired by its JavaScript
+[path-to-regexp][path-to-regexp-js].
