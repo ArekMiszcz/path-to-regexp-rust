@@ -1,8 +1,6 @@
 # path_to_regexp
 Turn a path string such as `/user/:name` into a regular expression
 
----
-
 ## Usage example
 ```rs
 extern crate path_to_regexp;
