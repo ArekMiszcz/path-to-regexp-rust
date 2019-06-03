@@ -1,6 +1,6 @@
 [package]
 name = "path_to_regexp"
-version = "0.1.1"
+version = "0.1.2"
 homepage = "https://github.com/ArekMiszcz/path-to-regexp-rust/tree/v0.1.1"
 authors = ["Arkadiusz Miszczyszyn <arkadiusz.miszczyszyn@gmail.com>"]
 edition = "2018"

@@ -25,8 +25,8 @@ impl Default for Options {
             whitelist: Vec::new(),
             strict: false,
             sensitive: false,
-            end: false,
-            start: false,
+            end: true,
+            start: true,
             ends_with: Vec::new()
         }
     }
