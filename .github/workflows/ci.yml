@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Quality (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+
+      - name: Check formatting
+        run: cargo +stable fmt --check
+
+      - name: Check all targets
+        run: cargo +stable check --all-targets --all-features
+
+      - name: Run Clippy
+        run: cargo +stable clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo +stable test --all-targets --all-features
+
+      - name: Run documentation tests
+        run: cargo +stable test --doc --all-features
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo +stable doc --no-deps --all-features
+
+      - name: Verify publishing
+        run: cargo +stable publish --dry-run
+
+  msrv:
+    name: MSRV (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Install Rust 1.85
+        run: rustup toolchain install 1.85 --profile minimal
+
+      - name: Check minimum supported Rust version
+        run: cargo +1.85 check --all-targets --all-features
+
+      - name: Run tests on minimum supported Rust version
+        run: cargo +1.85 test --all-targets --all-features
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Install stable Rust with coverage tools
+        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        run: cargo +stable install cargo-llvm-cov --version 0.8.7 --locked
+
+      - name: Enforce line coverage
+        run: cargo +stable llvm-cov --all-targets --all-features --fail-under-lines 100

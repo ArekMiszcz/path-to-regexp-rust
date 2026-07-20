@@ -1,359 +1,451 @@
-extern crate regex;
-extern crate fancy_regex;
-
-use regex::Regex;
 use fancy_regex::Regex as FancyRegex;
+use regex::Regex;
+use std::sync::LazyLock;
 
-/**
- * Default configs.
- */
 const DEFAULT_DELIMITER: char = '/';
+static PATH_REGEXP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(\\.)|(?::(\w+)(?:\(((?:\\.|[^\\()])+)\))?|\(((?:\\.|[^\\()])+)\))([+*?])?")
+        .expect("the token parser regex must be valid")
+});
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
-    delimiter: char,
-    whitelist: Vec<String>,
-    strict: bool,
-    sensitive: bool,
-    end: bool,
-    start: bool,
-    ends_with: Vec<String>
+    pub delimiter: char,
+    pub whitelist: Vec<String>,
+    pub strict: bool,
+    pub sensitive: bool,
+    pub end: bool,
+    pub start: bool,
+    pub ends_with: Vec<String>,
 }
+
 impl Default for Options {
-    fn default () -> Options {
-        Options {
+    fn default() -> Self {
+        Self {
             delimiter: DEFAULT_DELIMITER,
             whitelist: Vec::new(),
             strict: false,
             sensitive: false,
             end: true,
             start: true,
-            ends_with: Vec::new()
+            ends_with: Vec::new(),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
-    name: String,
-    prefix: String,
-    delimiter: char,
-    optional: bool,
-    repeat: bool,
-    pattern: String
+    pub name: String,
+    pub prefix: String,
+    pub delimiter: char,
+    pub optional: bool,
+    pub repeat: bool,
+    pub pattern: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Match {
-    name: String,
-    value: String
+    pub name: String,
+    pub value: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Container {
-    token: Option<Token>,
-    path: String
+    pub token: Option<Token>,
+    pub path: String,
 }
 
-/**
- * Escape a regular expression string.
- *
- * @param  {String} string
- * @return {String}
- */
-fn escape_string (string: String) -> String {
-    let re = Regex::new(r"([.+*?=^!:${}()[\]|/\\]])").unwrap();
-    re.replace_all(string.as_str(), r"\$1").into_owned()
+fn escape_string(value: &str) -> String {
+    regex::escape(value)
 }
 
-/**
- * Escape the capturing group by escaping special characters and meaning.
- *
- * @param  {String} group
- * @return {String}
- */
-fn escape_group (group: String) -> String {
-    let re = Regex::new(r"([=!:$/()])").unwrap();
-    re.replace_all(group.as_str(), r"\$1").into_owned()
+fn escape_group(group: &str) -> String {
+    group
+        .chars()
+        .flat_map(|character| {
+            if matches!(character, '=' | '!' | ':' | '$' | '/' | '(' | ')') {
+                vec!['\\', character]
+            } else {
+                vec![character]
+            }
+        })
+        .collect()
 }
 
-/**
- * Get the flags for a regexp from the options.
- *
- * @param  {Options} options
- * @return {String}
- */
-fn flags (route: &str, options: Options) -> String {
+fn flags(route: &str, options: &Options) -> String {
     if !options.sensitive {
         format!("(?i){}", route)
     } else {
-        String::from(route)
+        route.to_owned()
     }
 }
 
-/**
- * Parse a string for the raw tokens and paths.
- *
- * @param  {&str} text
- * @param  {Options} options
- * @return (Vec<Container>)
- */
-pub fn parse (text: &str, options: Options) -> Vec<Container> {
-    let default_delimiter: char = options.delimiter;
-    let whitelist: &Vec<String> = &options.whitelist;
-    let path_regexp: Regex = Regex::new(vec![
-        // Match escaped characters that would otherwise appear in future matches.
-        // This allows the user to escape special characters that won't transform.
-        r"(\\.)",
-        // Match Express-style parameters and un-named parameters with a prefix
-        // and optional suffixes. Matches appear as:
-        //
-        // ":test(\\d+)?" => ["test", "\d+", NONE, "?"]
-        // "(\\d+)"  => [NONE, NONE, "\d+", NONE]
-        r"(?::(\w+)(?:\(((?:\\.|[^\\()])+)\))?|\(((?:\\.|[^\\()])+)\))([+*?])?"
-    ].join("|").as_str()).unwrap();
+pub fn parse(text: &str, options: Options) -> Vec<Container> {
+    let default_delimiter = options.delimiter;
     let mut index = 0;
-    let mut key = -1;
+    let mut key = 0;
     let mut path = String::new();
     let mut path_escaped = false;
-    let mut containers: Vec<Container> = vec![];
+    let mut containers = Vec::new();
 
-    fn unwrap_match_to_str (m: Option<regex::Match>) -> &str {
-        if m != None {
-            m.unwrap().as_str()
-        } else {
-            ""
-        }
-    }
+    for captures in PATH_REGEXP.captures_iter(text) {
+        let full_match = captures.get(0).expect("capture zero must exist");
+        let offset = full_match.start();
 
-    if !path_regexp.is_match(text) {
-        return containers;
-    }
+        path.push_str(&text[index..offset]);
+        index = full_match.end();
 
-    for res in path_regexp.captures_iter(text) {
-        let m = res.get(0).unwrap();
-        let escaped = res.get(1);
-        let offset = m.start();
-
-        path.push_str(text.get(index..offset).unwrap());
-        index = offset + m.as_str().len();
-
-        // Ignore already escaped sequences.
-        if escaped != None {
-            path.push_str(escaped.unwrap().as_str());
+        if let Some(escaped) = captures.get(1) {
+            path.push_str(&escaped.as_str()[1..]);
             path_escaped = true;
             continue;
         }
 
-        let mut prev: String = String::new();
-        let name = unwrap_match_to_str(res.get(2));
-        let capture = unwrap_match_to_str(res.get(3));
-        let group = res.get(4);
-        let modifier = unwrap_match_to_str(res.get(5));
+        let mut prefix = String::new();
+        let name = captures.get(2).map_or("", |value| value.as_str());
+        let capture = captures.get(3).map_or("", |value| value.as_str());
+        let group = captures.get(4).map_or("", |value| value.as_str());
+        let modifier = captures.get(5).map_or("", |value| value.as_str());
 
-        if !path_escaped && path.len() > 0 {
-            let k = path.len();
-            let c = String::from(path.get(k-1..k).unwrap());
-            let matches: bool = if whitelist.len() > 0 {
-                whitelist.into_iter().find(|&x| x == &c) != None
-            } else {
-                false
-            };
+        if !path_escaped && !path.is_empty() {
+            let candidate = path.chars().next_back().expect("path must not be empty");
+            let accepted = options.whitelist.is_empty()
+                || options
+                    .whitelist
+                    .iter()
+                    .any(|allowed| allowed == &candidate.to_string());
 
-            if matches {
-                prev = c;
-                path = String::from(path.get(0..k).unwrap());
+            if accepted {
+                prefix.push(candidate);
+                path.pop();
             }
         }
 
-        // Push the current path onto the tokens.
-        if path != "" {
+        if !path.is_empty() {
             containers.push(Container {
-                path,
-                token: None
+                token: None,
+                path: std::mem::take(&mut path),
             });
-            path = String::new();
             path_escaped = false;
         }
 
         let repeat = modifier == "+" || modifier == "*";
         let optional = modifier == "?" || modifier == "*";
-        let pattern = if capture.len() > 0 {
+        let pattern = if !capture.is_empty() {
             capture
-        } else if group != None {
-            group.unwrap().as_str()
+        } else if !group.is_empty() {
+            group
         } else {
             ""
         };
-        let delimiter: char = if prev != "" {
-            prev.chars().next().unwrap()
-        } else {
+        let delimiter = if prefix.is_empty() {
             default_delimiter
+        } else {
+            prefix.chars().next().expect("prefix must not be empty")
+        };
+        let name = if name.is_empty() {
+            let generated = key.to_string();
+            key += 1;
+            generated
+        } else {
+            name.to_owned()
+        };
+        let pattern = if pattern.is_empty() {
+            let delimiters = if delimiter == default_delimiter {
+                delimiter.to_string()
+            } else {
+                format!("{delimiter}{default_delimiter}")
+            };
+            format!("[^{}]+?", escape_string(&delimiters))
+        } else {
+            escape_group(pattern)
         };
 
         containers.push(Container {
-            path: String::new(),
             token: Some(Token {
-                name: if name != "" {
-                    name.to_owned()
-                } else {
-                    key += 1;
-                    key.to_string()
-                },
-                prefix: prev,
-                delimiter: delimiter,
-                optional: optional,
-                repeat: repeat,
-                pattern: if pattern != "" {
-                    escape_group(pattern.to_owned())
-                } else {
-                    let pattern_delimiter = if delimiter == default_delimiter {
-                        delimiter.to_string()
-                    } else {
-                        vec![delimiter, default_delimiter].into_iter().collect()
-                    };
-                    
-                    format!(r"[^\{}]+?", escape_string(pattern_delimiter))
-                }
-            })
+                name,
+                prefix,
+                delimiter,
+                optional,
+                repeat,
+                pattern,
+            }),
+            path: String::new(),
         });
     }
 
-    // Push any remaining characters.
-    if path.len() > 0 || index < text.len() {
-        path.push_str(text.get(index..text.len()).unwrap());
-        containers.push(Container {
-            path,
-            token: None
-        });
+    if !path.is_empty() || index < text.len() {
+        path.push_str(&text[index..]);
+        containers.push(Container { token: None, path });
     }
 
     containers
 }
 
-/**
- * Expose a function for taking containers and returning a FancyRegex.
- *
- * @param  {Vec<Container>} containers
- * @param  {Options} options
- * @return {FancyRegex}
- */
-pub fn to_regexp (containers: &Vec<Container>, options: Options) -> FancyRegex {
-    let strict = options.strict;
-    let start = options.start;
-    let end = options.end;
-    let delimiter = options.delimiter;
-    let ends_with = if options.ends_with.len() > 0 {
-        let mut _ends_with_vec = &options.ends_with;
-        let mut _ends_with: Vec<String> = _ends_with_vec.into_iter().map(|s| {
-            escape_string(s.to_string())
-        }).collect();
-        _ends_with.push(String::from("$"));
-        _ends_with.join("|")
+pub fn try_to_regexp(
+    containers: &[Container],
+    options: Options,
+) -> fancy_regex::Result<FancyRegex> {
+    let mut ends_with: Vec<String> = options
+        .ends_with
+        .iter()
+        .map(|value| escape_string(value))
+        .collect();
+    ends_with.push("$".to_owned());
+    let ends_with = ends_with.join("|");
+    let mut route = if options.start {
+        "^".to_owned()
     } else {
-        String::from("$")
-    };
-    let mut route = if start == true {
-        String::from("^")
-    } else {
-        String::from("")
+        String::new()
     };
 
-    // Iterate over the containers and create our regexp string.
-    for i in 0..containers.len() {
-        let container = &containers[i];
-        
+    for container in containers {
         if !container.path.is_empty() {
-            route.push_str(escape_string(container.path.to_string()).as_str());
-        } else {
-            let token = container.token.as_ref().unwrap();
-            let prefix = String::from(token.prefix.as_str());
-            let capture = if token.repeat == true {
-                format!("(?:{})(?:{}(?:{}))*", token.pattern.as_str(), escape_string(token.delimiter.to_string()).as_str(), token.pattern.as_str())
+            route.push_str(&escape_string(&container.path));
+        } else if let Some(token) = &container.token {
+            let capture = if token.repeat {
+                format!(
+                    "(?:{})(?:{}(?:{}))*",
+                    token.pattern,
+                    escape_string(&token.delimiter.to_string()),
+                    token.pattern
+                )
             } else {
-                format!("{}", token.pattern.as_str())
+                token.pattern.clone()
             };
 
             if token.optional {
-                if token.prefix != "" {
-                    route.push_str(format!("({})", capture.as_str()).as_str());
+                if token.prefix.is_empty() {
+                    route.push_str(&format!("({capture})?"));
                 } else {
-                    route.push_str(format!("(?:{}({}))?", escape_string(prefix).as_str(), capture.as_str()).as_str());
+                    route.push_str(&format!("(?:{}({capture}))?", escape_string(&token.prefix)));
                 }
             } else {
-                route.push_str(format!("{}({})", escape_string(prefix).as_str(), capture.as_str()).as_str());
+                route.push_str(&format!("{}({capture})", escape_string(&token.prefix)));
             }
         }
     }
 
-    if end {
-        if !strict {
-            route.push_str(format!("(?:{})?", escape_string(delimiter.to_string())).as_str());
+    if options.end {
+        if !options.strict {
+            route.push_str(&format!(
+                "(?:{})?",
+                escape_string(&options.delimiter.to_string())
+            ));
         }
 
         if ends_with == "$" {
-            route.push_str("$");
+            route.push('$');
         } else {
-            route.push_str(format!("(?={})", ends_with).as_str());
-        };
+            route.push_str(&format!("(?={ends_with})"));
+        }
     } else {
-        let last_container: &Container = containers.last().unwrap();
-        let is_end_delimited = if !last_container.path.is_empty() {
-            let last_path_char = last_container.path.get(last_container.path.len() - 1..last_container.path.len()).unwrap();
-            last_path_char.to_string()
-        } else {
-            String::new()
-        };
+        let is_end_delimited = containers.last().is_none_or(|container| {
+            !container.path.is_empty() && container.path.ends_with(options.delimiter)
+        });
 
-        if !strict {
-            route.push_str(format!("(?:{}(?={}))?", escape_string(delimiter.to_string()), ends_with).as_str());
+        if !options.strict {
+            route.push_str(&format!(
+                "(?:{}(?={ends_with}))?",
+                escape_string(&options.delimiter.to_string())
+            ));
         }
 
-        if is_end_delimited.is_empty() {
-            route.push_str(format!("(?={}|{})", escape_string(delimiter.to_string()), ends_with).as_str());
+        if !is_end_delimited {
+            route.push_str(&format!(
+                "(?={}|{ends_with})",
+                escape_string(&options.delimiter.to_string())
+            ));
         }
     }
 
-    let regex_str = format!(r"{}", flags(route.as_str(), options).as_str());
-
-    FancyRegex::new(regex_str.as_str()).unwrap()
+    FancyRegex::new(&flags(&route, &options))
 }
 
-/**
- * Function for matching text with parsed tokens.
- *
- * @param  {&str} text
- * @param  {FancyRegex} regexp
- * @param  {Vec<Container>} containers
- * @return {Vec<Match>}
- */
-pub fn match_str (text: &str, regexp: FancyRegex, containers: Vec<Container>) -> Vec<Match> {
-    let mut matches: Vec<Match> = vec![];
+pub fn to_regexp(containers: &[Container], options: Options) -> FancyRegex {
+    try_to_regexp(containers, options).expect("generated route regex must be valid")
+}
 
-    if !regexp.is_match(text).unwrap() {
-        return matches;
-    }
-    
-    let containers: Vec<Container> = containers.into_iter()
-        .filter(|container| container.path == "")
+pub fn try_match_str(
+    text: &str,
+    regexp: &FancyRegex,
+    containers: &[Container],
+) -> fancy_regex::Result<Vec<Match>> {
+    let Some(captures) = regexp.captures(text)? else {
+        return Ok(Vec::new());
+    };
+    let tokens = containers
+        .iter()
+        .filter_map(|container| container.token.as_ref());
+    let matches = tokens
+        .enumerate()
+        .filter_map(|(index, token)| {
+            captures.get(index + 1).map(|capture| Match {
+                name: token.name.clone(),
+                value: capture.as_str().to_owned(),
+            })
+        })
         .collect();
 
-    if let Some(caps) = regexp.captures_from_pos(&text, 0).unwrap() {
-        for i in 0..caps.len() {
-            let cap = caps.at(i).unwrap();
+    Ok(matches)
+}
 
-            if cap.len() == text.len() {
-                continue;
-            }
+pub fn match_str(text: &str, regexp: FancyRegex, containers: Vec<Container>) -> Vec<Match> {
+    try_match_str(text, &regexp, &containers).expect("route matching must not exceed regex limits")
+}
 
-            let container = containers.get(i-1).unwrap();
-            if let Some(token) = &container.token {
-                matches.push(Match {
-                    name: String::from(token.name.as_str()),
-                    value: cap.to_owned()
-                });
-            }
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn matches(route: &str, path: &str, options: Options) -> Vec<Match> {
+        let containers = parse(route, options.clone());
+        let regexp = to_regexp(&containers, options);
+        match_str(path, regexp, containers)
     }
 
-    matches
+    fn is_match(route: &str, path: &str, options: Options) -> bool {
+        let containers = parse(route, options.clone());
+        to_regexp(&containers, options).is_match(path).unwrap()
+    }
+
+    #[test]
+    fn matches_named_parameters() {
+        assert_eq!(
+            matches("/route/:foo/:id", "/route/john/7", Options::default()),
+            vec![
+                Match {
+                    name: "foo".to_owned(),
+                    value: "john".to_owned(),
+                },
+                Match {
+                    name: "id".to_owned(),
+                    value: "7".to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn matches_static_routes() {
+        assert!(is_match("/health", "/health", Options::default()));
+        assert!(!is_match("/health", "/other", Options::default()));
+    }
+
+    #[test]
+    fn makes_prefix_and_parameter_optional_together() {
+        assert!(is_match("/user/:id?", "/user", Options::default()));
+        assert!(is_match("/user/:id?", "/user/42", Options::default()));
+        assert!(is_match("/user/:id?", "/user/", Options::default()));
+    }
+
+    #[test]
+    fn supports_repeated_parameters() {
+        assert_eq!(
+            matches("/files/:path+", "/files/a/b/c", Options::default()),
+            vec![Match {
+                name: "path".to_owned(),
+                value: "a/b/c".to_owned(),
+            }]
+        );
+        assert!(is_match("/files/:path*", "/files", Options::default()));
+    }
+
+    #[test]
+    fn supports_custom_patterns_and_unnamed_parameters() {
+        assert!(is_match("/user/:id(\\d+)", "/user/42", Options::default()));
+        assert!(!is_match(
+            "/user/:id(\\d+)",
+            "/user/nope",
+            Options::default()
+        ));
+        assert_eq!(matches("/(\\d+)", "/42", Options::default())[0].name, "0");
+    }
+
+    #[test]
+    fn treats_escaped_parameter_markers_as_literals() {
+        assert!(is_match(r"/user/\:id", "/user/:id", Options::default()));
+    }
+
+    #[test]
+    fn honors_case_sensitivity() {
+        assert!(is_match("/User", "/user", Options::default()));
+        let options = Options {
+            sensitive: true,
+            ..Options::default()
+        };
+        assert!(!is_match("/User", "/user", options));
+    }
+
+    #[test]
+    fn honors_strict_trailing_delimiters() {
+        assert!(is_match("/user", "/user/", Options::default()));
+        let options = Options {
+            strict: true,
+            ..Options::default()
+        };
+        assert!(!is_match("/user", "/user/", options));
+    }
+
+    #[test]
+    fn supports_non_ending_matches_at_segment_boundaries() {
+        let options = Options {
+            end: false,
+            ..Options::default()
+        };
+        assert!(is_match("/user", "/user/42", options.clone()));
+        assert!(!is_match("/user", "/username", options));
+    }
+
+    #[test]
+    fn supports_unanchored_matches() {
+        let options = Options {
+            start: false,
+            ..Options::default()
+        };
+        assert!(is_match("/user/:id", "/api/user/42", options));
+    }
+
+    #[test]
+    fn supports_custom_end_markers() {
+        let options = Options {
+            ends_with: vec!["?".to_owned()],
+            ..Options::default()
+        };
+        assert!(is_match("/user/:id", "/user/42?query", options));
+    }
+
+    #[test]
+    fn handles_unicode_paths() {
+        assert_eq!(
+            matches("/café/:name", "/café/żółw", Options::default())[0].value,
+            "żółw"
+        );
+    }
+
+    #[test]
+    fn whitelist_controls_parameter_prefixes() {
+        let options = Options {
+            whitelist: vec!["/".to_owned()],
+            ..Options::default()
+        };
+        assert!(is_match("/file-:ext?", "/file-", options.clone()));
+        assert!(!is_match("/file-:ext?", "/file", options));
+    }
+
+    #[test]
+    fn omits_unmatched_optional_parameters() {
+        assert!(matches("/user/:id?", "/user", Options::default()).is_empty());
+    }
+
+    #[test]
+    fn captures_a_parameter_that_spans_the_entire_match() {
+        assert_eq!(
+            matches(":id", "42", Options::default()),
+            vec![Match {
+                name: "id".to_owned(),
+                value: "42".to_owned(),
+            }]
+        );
+    }
 }
